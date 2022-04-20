@@ -48,16 +48,16 @@ InData3<-read_csv("RFID CSV Files/RFID_CSV_3.csv")%>%
 InData4<-read_csv("RFID CSV Files/RFID_CSV_4.csv")%>%
   data.frame()
 
-InData5<-read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID CSV Files/RFID_CSV_5.csv")%>%
+InData5<-read_csv("RFID CSV Files/RFID_CSV_5.csv")%>%
   data.frame()
 
-InData6<-read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID CSV Files/RFID_CSV_6.csv")%>%
+InData6<-read_csv("RFID CSV Files/RFID_CSV_6.csv")%>%
   data.frame()
 
-InData7<-read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID CSV Files/RFID_CSV_7.csv")%>%
+InData7<-read_csv("RFID CSV Files/RFID_CSV_7.csv")%>%
   data.frame()
 
-InData8<-read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID CSV Files/RFID_CSV_8.csv")%>%
+InData8<-read_csv("RFID CSV Files/RFID_CSV_8.csv")%>%
   data.frame()
 
 #Combine Dataframes into one Master Data Frame
@@ -75,7 +75,7 @@ length(unique(raw.data$UID))
 #Filter out extra 'pings'and prepping dataset for the Track a Forager software
 ```{r}
 #read in master data with proper column headingd for "feedr" package
-raw.data <- read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID_raw_master.csv") %>%
+raw.data <- read_csv("RFID_raw_master.csv") %>%
   dplyr::rename("time" = "UTCTime",
          "logger_id" = "Address",
          "animal_id" = "UID") %>%
@@ -126,22 +126,6 @@ View(Nolan.Data)
 Nolan.trips.RFID <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/Nolans Output/NatJoin2_[1, 2]_tripsPerRFID.TXT")
 
 View(Nolan.trips.RFID)
-```
-
-#Track-a-Forager Results (4 data frames) -- START HERE
-```{r}
-#in.outs
-in.out <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_inouts.TXT")
-View(in.out)
-#trip.lengths
-trip.lengths <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_lengthsTripsFlights.TXT")
-View(trip.lengths)
-#trips
-trips <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
-View(trips)
-#RFID.trips
-RFID.trips <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_tripsPerRFID.TXT")
-View(RFID.trips)
 ```
 
 #Reading in Phenotype Key files
@@ -266,15 +250,31 @@ Pheno.Key <- rbind(Fast.Bees,Slow.Bees)%>%
 Pheno.Key <- rbind(Pheno.Key, unsorted)
 View(Pheno.Key)
 
-write_csv(Pheno.Key, "/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Pheno.Key.CSV")
+write_csv(Pheno.Key, "RFID Cohort CSV/Pheno.Key.CSV")
+```
+
+# START HERE - Track-a-Forager Results (4 data frames)
+```{r}
+#in.outs
+in.out <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_inouts.TXT")
+View(in.out)
+#trip.lengths
+trip.lengths <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_lengthsTripsFlights.TXT")
+View(trip.lengths)
+#trips
+trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
+View(trips)
+#RFID.trips
+RFID.trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_tripsPerRFID.TXT")
+View(RFID.trips)
 ```
 
 #Lifespan (AGE)
 ##Read in Data
 ```{r}
-Pheno.Key <- read.csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Pheno.Key.CSV")
+Pheno.Key <- read.csv("RFID Cohort CSV/Pheno.Key.CSV")
 
-trips <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
+trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
 View(trips)
 ```
 
@@ -303,7 +303,8 @@ View(last.trip)
 
 ls<-last.trip%>%
   group_by(RFID)%>%
-  dplyr::mutate(lifespan = max(age))%>%
+  dplyr::mutate(lifespan = max(age),
+                tagged_date = ymd(tagged_date))%>%
   dplyr::filter(row_number()==1)%>%
   dplyr::select(-c("Trip_ID", "age"))%>%
   drop_na()
@@ -422,6 +423,11 @@ p <- age.sum %>%
     theme_pubr() +
     labs(fill="")
 
+#Scatterplot with AOF and tagged date
+ggplot(ls) +
+  geom_point(aes(x=tagged_date, y= lifespan, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= lifespan, color = Phenotype))+
+  theme_bw()
 ```
 
 ##Miscellaneous
@@ -509,10 +515,10 @@ ggplot(age.pheno, aes (x = Phenotype, y=`age last trip`, color = Phenotype)) +
 ```{r}
 #join trip.length and pheno.key dataframes and create columns for total trip length and average trip length
 #each entry is a trip
-trip.lengths <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_lengthsTripsFlights.TXT")
+trip.lengths <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_lengthsTripsFlights.TXT")
 
 trip.lengths <- left_join(trip.lengths, Pheno.Key) %>%
-  rename(trip_length_s = `Trip length (in seconds)`)%>%
+  dplyr::rename(trip_length_s = `Trip length (in seconds)`)%>%
   group_by(RFID)%>%
   mutate(avg_trip_length = mean(trip_length_s),
          total_trip_length = sum(trip_length_s))%>% #This is the total time spent foraging over the individual's life
@@ -526,7 +532,10 @@ trips.sum <- group_by(trip.lengths, RFID, Phenotype) %>%
     avg_trip_length = mean(trip_length_s),
     total_trip_length = sum(trip_length_s))
 View(trips.sum)
+```
 
+##Visualize Data
+```{r}
 #total trip length
 options(scipen = 999)
 freq.hist.total.trips <- trips.sum %>%
@@ -622,6 +631,12 @@ freq.hist.number.of.trips <- trips.per.day %>%
     scale_fill_manual(values=c("firebrick3", "steelblue")) +
     theme_pubr() +
     labs(x = "total trips", fill="")
+
+#Scatterplot with AOF and tagged date
+ggplot(trips.per.day) +
+  geom_point(aes(x=tagged_date, y= trips_per_day, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= trips_per_day, color = Phenotype))+
+  theme_bw()
 ```
 
 #Age of Onset of Foraging (AOF)
@@ -680,6 +695,9 @@ AOF.clean <- AOF %>%
   mutate(AOF = as.numeric(AOF))
 View(AOF.clean)
 
+#write CSV for AOF output
+write_csv(AOF.clean, "AOF.output")
+
 #Add phenotype back into the mix
 AOF.pheno <- inner_join(Pheno.Key, AOF.clean)%>%
   dplyr::select("RFID", "AOF", "Phenotype")
@@ -691,6 +709,7 @@ View(AOF.pheno)
 
 ##Summarize Data
 ```{r}
+AOF.pheno <- read_csv("AOF.pheno.CSV")
 #Summary of AOF mean, sd, and se per phenotype
 AOF.pheno.sum <- group_by(AOF.pheno, Phenotype) %>%
   dplyr::summarize(
@@ -699,6 +718,10 @@ AOF.pheno.sum <- group_by(AOF.pheno, Phenotype) %>%
     sd = sd(AOF),
     se = sd(AOF) / sqrt((length(AOF))))
 View(AOF.pheno.sum)
+
+#Dataframe including tagged date
+AOF.pheno.date <- left_join(AOF.pheno, Pheno.Key)%>%
+  mutate(tagged_date = ymd(tagged_date))
 ```
 ##Stats
 ```{r}
@@ -761,6 +784,30 @@ bar.AOF <- ggplot(AOF.pheno.sum, aes(x=Phenotype, y=mean, fill = Phenotype))+
             labs(y ="Age at onset of foraging (AOF)")+
             theme(legend.title = element_blank())
 bar.AOF
+
+#Scatterplot with AOF and tagged date
+ggplot(AOF.pheno.date) +
+  geom_point(aes(x=tagged_date, y= AOF, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= AOF, color = Phenotype))+
+  theme_bw()
+
+#Scatterplot with lifespan and tagged date
+AOF.pheno.date.ls <- left_join(AOF.pheno.date, ls)
+ggplot(AOF.pheno.date.ls) +
+  geom_point(aes(x=tagged_date, y= lifespan, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= lifespan, color = Phenotype))+
+  theme_bw()
+
+
+hist(AOF.pheno.date.ls$lifespan)
+ggqqplot(AOF.pheno.date.ls$lifespan)
+t.test((AOF.pheno.date.ls %>% pull(lifespan)) ~ (AOF.pheno.date.ls %>% pull(Phenotype)))
+
+lm.aof.ls <- lm(lifespan ~ Phenotype, data = AOF.pheno.date.ls)
+summary(lm.aof.ls)
+anova(lm.aof.ls)
+plot(lm.aof.ls) 
+
 ```
 ###log transform
 ```{r}
@@ -782,9 +829,10 @@ bar.log.AOF
 #Number of Foraging Days
 ##Calculate the number of days spent foraging
 ```{r}
+AOF.clean <- read_csv("AOF.output")
 foraging.days <- inner_join(ls, AOF.clean)%>%
   dplyr::mutate(foraging_days = lifespan - AOF)%>%
-  dplyr::select("RFID", "Phenotype", "foraging_days")
+  dplyr::select("RFID", "Phenotype", "foraging_days", "tagged_date")
 
 View(foraging.days)
 ```
@@ -816,7 +864,13 @@ freq.hist.foraging.days <- foraging.days %>%
     scale_fill_manual(values=c("firebrick3", "steelblue")) +
     theme_pubr() +
     labs(x = "foraging days", fill="")
-```
+
+#Scatterplot with AOF and tagged date
+ggplot(foraging.days) +
+  geom_point(aes(x=tagged_date, y= foraging_days, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= foraging_days, color = Phenotype))+
+  theme_bw()
+```  
 
 #Average number of Trips per day after AOF
 ##Calculating trips per day after AOF
@@ -850,10 +904,18 @@ t.test((trips.per.day.foraging %>% pull(trips_per_day_foraging)) ~ (trips.per.da
 #Histogram with fast and slow bars split
 freq.hist.trips.after.AOF <- trips.per.day.foraging %>%
   ggplot( aes(x=trips_per_day_foraging, fill=Phenotype)) +
-    geom_histogram( color="#e9ecef", alpha=0.6, position = 'dodge') +
+    geom_histogram(color="#e9ecef", alpha=0.6, position = 'dodge') +
     scale_fill_manual(values=c("firebrick3", "steelblue")) +
     theme_pubr() +
     labs(x = "trips per day after AOF", fill="")
+
+
+#Scatterplot with AOF and tagged date
+ggplot(trips.per.day.foraging) +
+  geom_point(aes(x=tagged_date, y= trips_per_day_foraging, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= trips_per_day_foraging, color = Phenotype))+
+  theme_bw()
+
 ```
 
 #Creating Master Data set
