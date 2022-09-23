@@ -7,6 +7,9 @@ output: html_document
 
 #Libraries
 ```{r}
+library(lmerTest)
+library(emmeans)
+library(nlme)
 library(tidyverse)
 library(dplyr)
 library(tidyr)
@@ -20,7 +23,6 @@ library(devtools)
 library(stringr)
 library(qdap)
 library(ggpubr)
-library(rlang)
 library(feedr)
 library(corrplot)
 library(car)
@@ -28,39 +30,33 @@ library(MASS)
 library(aof)
 library(GGally)
 library(Hmisc)
-#install.packages("devtools") # if not already installed
-#devtools::install_github("animalnexus/feedr")
-#install.packages("feedr")
+library(modelbased)
+library(broom)
+library(survival) # for cox proportion hazards model if I want to run that
+library(survminer)
 ```
 
-#Reading in raw RFID data files
+#Reading in raw RFID csv data files (fter conversion from raw xml
 ```{r}
-#Read in seperate RFID CSVs
+#Read in individual RFID files
 InData1<-read_csv("RFID CSV Files/RFID_CSV_1.csv")%>%
   data.frame()
-
 InData2<-read_csv("RFID CSV Files/RFID_CSV_2.csv")%>%
   data.frame()
-
 InData3<-read_csv("RFID CSV Files/RFID_CSV_3.csv")%>%
   data.frame()
-
 InData4<-read_csv("RFID CSV Files/RFID_CSV_4.csv")%>%
   data.frame()
-
 InData5<-read_csv("RFID CSV Files/RFID_CSV_5.csv")%>%
   data.frame()
-
 InData6<-read_csv("RFID CSV Files/RFID_CSV_6.csv")%>%
   data.frame()
-
 InData7<-read_csv("RFID CSV Files/RFID_CSV_7.csv")%>%
   data.frame()
-
 InData8<-read_csv("RFID CSV Files/RFID_CSV_8.csv")%>%
   data.frame()
 
-#Combine Dataframes into one Master Data Frame
+#Combine dataframes into Master dataframe
 InDataMaster <-rbind(InData1, InData2, InData3, InData4,InData5,InData6,InData7,InData8,.id = NULL)%>%
   dplyr::select("UTCTime", "Address", "UID")
 #Change characters to factors
@@ -68,13 +64,13 @@ InDataMaster$UTCTime<-as.factor(InDataMaster$UTCTime)
 InDataMaster$UID<-as.factor(InDataMaster$UID)
 #Write data file
 write_delim(InDataMaster, "RFID_raw_master.txt", quote = FALSE)
-#check unique rows
+#QC: check unique rows
 length(unique(raw.data$UID))
 ```
 
-#Filter out extra 'pings'and prepping dataset for the Track a Forager software
+#"Feedr" package: Filter out extra 'pings' and prep dataset for the Track-a-Forager software
 ```{r}
-#read in master data with proper column headingd for "feedr" package
+#read in master data with proper column headings for "feedr" package
 raw.data <- read_csv("RFID_raw_master.csv") %>%
   dplyr::rename("time" = "UTCTime",
          "logger_id" = "Address",
@@ -82,102 +78,87 @@ raw.data <- read_csv("RFID_raw_master.csv") %>%
  dplyr:: mutate(time = lubridate::mdy_hms(time))
 View(raw.data)
 
-#filter data using feedr package (At this point, we still have 1.3 million lines of data)
-raw.data <- load_format(raw.data) # Doesnt change the number of entries
-#Collapses consecutive reads from a single bee, within 1s (bw = 1) of each other: provides a start time and end time for each collapsed segment. 
-filtered.data<-visits(r = raw.data, bw = 1, allow_imp = TRUE) #This filters to 133,193 data entries
+#filter data using "feedr" package (At this point, we still have 1.3 million lines of data)
+raw.data <- load_format(raw.data) # (Doesnt change the number of entries
+#Collapses consecutive reads from a single bee, within 1s (bw = 1) of each other: provides a start time and end time for each collapsed segment.) 
+filtered.data<-visits(r = raw.data, bw = 1, allow_imp = TRUE) #(This filters to 133,193 data entries)
 View(filtered.data)
+```
 
+#Track-a-Forager software: prepare data format
+```{r}
 #Rename columns for Track-a-Forager Format
 filtered.TAF <- filtered.data %>%
   dplyr::rename("UTCTime" ="start",
         "Address" = "logger_id",
         "UID" =  "animal_id" ) %>%
   dplyr::select("UTCTime", "Address", "UID")
-
 View(filtered.TAF)
-    
-#All the different ways to change date format
-  #mutate(UTCTime = format(Sys.time(), "%m/%d/%Y %H:%M:%S"))
-  #utate(UTCTime =lubridate::mdy_hms(UTCTime))
-  #mutate(UTCTime = as.POSIXct(UTCTime,"%m/%d/%Y %H:%M:%S"))
-  #filtered.TAF$UTCTime<-strptime(filtered.TAF$UTCTime,"%m/%d/%Y %H:%M:%S")
 
-#Change variabbles to factors
+###FOR REFFERENCE: All the different ways to change date format###
+    #mutate(UTCTime = format(Sys.time(), "%m/%d/%Y %H:%M:%S"))
+    #mutate(UTCTime =lubridate::mdy_hms(UTCTime))
+    #mutate(UTCTime = as.POSIXct(UTCTime,"%m/%d/%Y %H:%M:%S"))
+    #filtered.TAF$UTCTime<-strptime(filtered.TAF$UTCTime,"%m/%d/%Y %H:%M:%S")
+
+#Change variables to factors
 filtered.TAF$UTCTime<-as.factor(filtered.TAF$UTCTime)
 filtered.TAF$UID<-as.factor(filtered.TAF$UID)
 head(filtered.TAF)
 
-#Different ways to write the data frame
+#Different ways to write the data frame -> choose your adventure
 write_csv2(filtered.TAF, "RFID_filtered.csv")
 write_delim(filtered.TAF, "RFID_filtered.txt")
 write.table(filtered.TAF, "RFID_filtered.txt", quote = F, row.names = F)
 write_tsv(filtered.TAF, "RFID_filtered.txt")
-#Run filtered.TAF through Track a Forager Software
 
-###############################################################################
-##Load in Nolan's Data
-Nolan.Data<-read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Nolan's Edit/Final_Honey_Bee_Data.CSV")
-#Number of unique UIDs (number of bees)
-length(unique(Nolan.Data$IUD))
-head(Nolan.Data)
-View(Nolan.Data)
-
-Nolan.trips.RFID <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/Nolans Output/NatJoin2_[1, 2]_tripsPerRFID.TXT")
-
-View(Nolan.trips.RFID)
+#####Run filtered.TAF through Track a Forager Software#####
+    #Reference README instructions at https://github.com/NaugLab/RFID-Analyses
 ```
 
-#Reading in Phenotype Key files
+#Phenotype and RFID Key (do this while running raw data through Track-a-Forager)
 ```{r}
 #Read in individual data files by semicolon delim
+#Fast Phenotypes
 F1 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-06-20__12-40-12.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)%>%
   dplyr::mutate(tagged_date = gsub(",.*", "", F1$tagged_date))
-
 F2 <- read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-06-24__15-02-52.CSV")%>%
   dplyr::rename(tagged_date = `Scan Number\tTimestamps\tUID\tTagType`)%>%
   dplyr::rename(UID = X2)%>%
   mutate(UID = str_replace(UID, " E0\tiID�-G", ""))
 F2  <- dplyr::select(F2,UID, tagged_date)
-
 F3 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-07-02__13-31-24.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)%>%
   dplyr::mutate(tagged_date = gsub(",.*", "", F3$tagged_date))
-  
 F4 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-07-09__08-41-14.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   F4$tagged_date <- gsub(",.*", "", F4$tagged_date)
-
 F5 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-07-17__13-43-36.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   F5$tagged_date <- gsub(",.*", "", F5$tagged_date)
-
 F6 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-07-23__13-42-42.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   F4$tagged_date <- gsub(",.*", "", F4$tagged_date)
-
 F7 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-07-30__12-44-18.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   F7$tagged_date <- gsub(",.*", "", F7$tagged_date)
-
 F8 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Fast_2020-08-07__13-47-13.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   F8$tagged_date <- gsub(",.*", "", F8$tagged_date)
-
+  
+#Slow Phenotypes
 S1 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-06-20__11-46-14.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S1$tagged_date <- gsub(",.*", "", S1$tagged_date)
-
-#need to add more code here to get rid of "t/"
 S2 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-06-24__15-36-50.CSV", delim = ",")%>%
   dplyr::rename(tagged_date = `Scan Number	Timestamps	UID	TagType`)%>%
   dplyr::rename(UID = X2)%>%
@@ -185,100 +166,91 @@ S2 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Proj
   mutate(UID = str_replace(UID, "\t", ""))
 S2<-S2[-1,]
 S2  <- dplyr::select(S2,UID, tagged_date)
-
 S3 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-07-02__14-49-31.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S3$tagged_date <- gsub(",.*", "", S3$tagged_date)
-
 S4 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-07-09__09-34-18.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S4$tagged_date <- gsub(",.*", "", S4$tagged_date)
-
 S5 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-07-17__14-43-28.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S5$tagged_date <- gsub(",.*", "", S5$tagged_date)
-
 S6 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-07-23__14-34-44.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S6$tagged_date <- gsub(",.*", "", S6$tagged_date)
-
 S7 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-07-31__14-00-53.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S7$tagged_date <- gsub(",.*", "", S7$tagged_date)
-
 S8 <- read_delim("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Slow_2020-08-07__13-09-14.CSV", delim = ";")%>%
   dplyr::rename(tagged_date = Timestamps)%>%
   dplyr::select(UID, tagged_date)
   S8$tagged_date <- gsub(",.*", "", S8$tagged_date)
-
 #June 12th pheno key (different format)
 unsorted <- read_csv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/RFID Cohort CSV/Unsorted/RFID_C1_June12.CSV")%>%
   mutate(tagged_date = as.Date(tagged_date))
-  
+
 #Combine data files
+#Fast bees
 Fast.Bees <- rbind(F1, F2, F3, F4, F5, F6, F7, F8)
 Fast.Bees<- Fast.Bees%>%
   mutate(tagged_date = as.Date(tagged_date))%>%
   dplyr::distinct()%>%
   drop_na()
-#Assign Phenotype ---- NOT TIDY :(
+##Assign Phenotype (NOT TIDY - but it works)
 f <- "Fast"
 Fast.Bees[,3] <- rep(f, length(Fast.Bees$UID))
 names(Fast.Bees)[1] <- "RFID"
 names(Fast.Bees)[3] <- "Phenotype"
 View(Fast.Bees)
-#Slow
+#Slow bees
 Slow.Bees <- rbind(S1, S2, S3, S4, S5, S6, S7, S8)
 Slow.Bees<- Slow.Bees%>%
   mutate(tagged_date = as.Date(tagged_date))%>%
   dplyr::distinct()%>%
   drop_na()
-#Assign Phenotype
+##Assign Phenotype
 s <- "Slow"
 Slow.Bees[,3] <- rep(s, length(Slow.Bees$UID))
 names(Slow.Bees)[1] <- "RFID"
 names(Slow.Bees)[3] <- "Phenotype"
 View(Slow.Bees)
-
+#Combine Fast and slow
 Pheno.Key <- rbind(Fast.Bees,Slow.Bees)%>%
   as_tibble()
 Pheno.Key <- rbind(Pheno.Key, unsorted)
 View(Pheno.Key)
-
+#Write Pheno Key CSV
 write_csv(Pheno.Key, "RFID Cohort CSV/Pheno.Key.CSV")
 ```
 
-# START HERE - Track-a-Forager Results (4 data frames)
+#START HERE (After Track-a-Forager)
 ```{r}
+#Read in Track-a-Forager Results (4 data frames)
 #in.outs
 in.out <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_inouts.TXT")
-View(in.out)
 #trip.lengths
 trip.lengths <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_lengthsTripsFlights.TXT")
-View(trip.lengths)
 #trips
 trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
-View(trips)
 #RFID.trips
 RFID.trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_tripsPerRFID.TXT")
-View(RFID.trips)
 ```
 
-#Lifespan (AGE)
+#A) Lifespan (AGE) 
 ##Read in Data
 ```{r}
+#Read in Phenotype Key
 Pheno.Key <- read.csv("RFID Cohort CSV/Pheno.Key.CSV")
-
+#Read in raw trips
 trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
 View(trips)
 ```
-
-##Wrangle Data
+##Wrangle
 ```{r}
 #Gather data for trips
 trips <- trips %>%
@@ -286,42 +258,47 @@ trips <- trips %>%
                 RFID = UID)%>%
   dplyr::group_by(Trip_ID)%>%
   drop_na()%>%
-  dplyr::filter(row_number()==1)%>%
-  dplyr::select("Trip_ID", "RFID", "UTCTime")#group the data by Trip_ID
-  #dplyr::filter(row_number()==1) #This filters out the first row of each "group".
+  dplyr::filter(row_number()==1)%>%#(This filters out the first row of each "group")
+  dplyr::select("Trip_ID", "RFID", "UTCTime")#(group the data by Trip_ID)
 
+#Combine trips and Pheno Key
 join.trips <- left_join(trips, Pheno.Key)%>%
   dplyr::mutate(UTCTime = gsub("\\..*", "", UTCTime))%>%
-  drop_na()#PROBLEM????
+  drop_na()
 View(join.trips)
 
-last.trip <- join.trips %>%  #This takes a while to run ?? :(
+#Calculate age of individual at each trip
+last.trip <- join.trips %>%  #(This takes a while to run)
   dplyr::mutate(UTCTime = as.Date(mdy_hms(UTCTime)))%>%
-  dplyr::mutate(age = difftime(UTCTime,tagged_date,units=c("days")))%>% #Create new column that calculates the difference from when the bee was first tagged (tagged_date) to when it was last pinged... effectively calculating age
+  dplyr::mutate(age = difftime(UTCTime,tagged_date,units=c("days")))%>% #(Create new column that calculates the difference from when the bee was first tagged (tagged_date) to when it was last pinged... effectively calculating age)
   dplyr::mutate(age = as.numeric(age), age = round(age))
 View(last.trip)
 
+#Calculate Lifespan
 ls<-last.trip%>%
   group_by(RFID)%>%
   dplyr::mutate(lifespan = max(age),
-                tagged_date = ymd(tagged_date))%>%
+                tagged_date = ymd(tagged_date),
+                Phenotype = as.factor(Phenotype))%>%
   dplyr::filter(row_number()==1)%>%
   dplyr::select(-c("Trip_ID", "age"))%>%
   drop_na()
 View(ls)
 
 #removing outlier 
-##We removed this bee because it was last pinged in October and is therefore considered here to be a winter bee
+##We removed this bee because it was last pinged in October and is therefore considered to be a winter bee
 ls <- ls[-197,]
+ls <- ls%>%
 ```
-##Summarize Data
+##Summarize
 ```{r}
 #Summary of the mean lifespan per phenotype
 age.sum.mean <- group_by(ls, Phenotype) %>%
   dplyr::summarize(
     n = dplyr::n(),
     mean = mean(lifespan),
-    sd = sd(lifespan))
+    sd = sd(lifespan),
+    se = sd(lifespan) / sqrt((length(lifespan))))
 View(age.sum.mean)
 
 #Alternative way to group and summarize data
@@ -366,200 +343,358 @@ freq.hist.lifespan <- ls %>%
 t.test((ls %>% pull(lifespan)) ~ (ls %>% pull(Phenotype)))
 ```
 ##Stats
+###Assumptions
 ```{r}
 #Test assumptions
 shapiro.test(age.sum$max.age)
 hist(age.sum$max.age)
 ggdensity(age.sum$max.age)
 ggqqplot(age.sum$max.age)
-
 #T Test
 t.test((age.sum %>% pull(max.age)) ~ (age.sum %>% pull(Phenotype)))
-
-#linear model
+```
+###linear models
+####1) Including all bees (n = 247)
+```{r}
+#linear model: lifespan ~ Phenotype
 lm.ls <- lm(lifespan ~ Phenotype, data = ls)
 summary(lm.ls)
-anova(lm.ls)
+Anova(lm.ls, type = 2)
 plot(lm.ls) #assumptions
+#linear model: lifespan ~ Phenotype + tagged_date (n = 247)
+lm.ls.date <- lm(lifespan ~ Phenotype * tagged_date, data = ls)
+summary(lm.ls.date)
+Anova(lm.ls.date, type = 3)
+plot(lm.ls.date) #assumptions
+```
+####2) Including only bees with recorded AOF (Manuscript) (n = 87)
+```{r}
+#This creates a data frame with only individuals that recorded an AOF (n = 87)
+AOF.pheno.date.ls <- left_join(AOF.pheno.date, ls)
+hist(AOF.pheno.date.ls$lifespan)
+ggqqplot(AOF.pheno.date.ls$lifespan)
+#change tagged_date to a factor and fix data entry mistakes
+AOF.pheno.date.ls <- AOF.pheno.date.ls%>%
+  mutate(tagged_date = as.factor(tagged_date))%>%
+  mutate(tagged_date = lapply(AOF.pheno.date.ls$tagged_date, gsub, pattern="2020-07-31", replacement="2020-07-30"))%>%
+  unnest(tagged_date)
+#t-test comparing phenotype differences
+t.test((AOF.pheno.date.ls %>% pull(lifespan)) ~ (AOF.pheno.date.ls %>% pull(Phenotype)))
+#lm with Phenotype and tagged date as -fixed- variables (n = 87) MANUSCRIPT
+lm.aof.ls.date <- lm(lifespan ~ Phenotype + tagged_date, data = AOF.pheno.date.ls)
+summary(lm.aof.ls.date)
+Anova(lm.aof.ls.date, type = 3)
+plot(lm.aof.ls.date) 
+emout.ls <- emmeans(lm.aof.ls.date, ~ Phenotype)
+pairs(emout.ls, adjustment = "none")
+```
+
+```{r}
+##Tagged date as a -random effect- (n = 87)
+lm.aof.ls.date.random <- lmer(lifespan ~ Phenotype + (1|tagged_date), data = AOF.pheno.date.ls, REML = T)
+slopes <- summary(lm.aof.ls.date.random)
+slopes$coefficients ##get model coefficients 
+Anova(lm.aof.ls.date.random, type = 3)##Get P value for fixed effects
+rand(lm.aof.ls.date.random)## Get p values for random effects 
+hist(lm.aof.ls.date.random$Flowers.Visited, breaks = 48)
 ```
 ##Visualize Data
 ```{r}
-#Plot Ages 
-age.bar.plot <- ggplot(age.sum.mean, 
-                   aes(x = Phenotype, y=mean, 
-                       color = Phenotype, 
-                       fill = Phenotype)) +
-            geom_bar(stat = "identity") +
-            theme_pubr()+
-            ylab("Average Age") +
-            theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-                  axis.title.x=element_text(size = 16),
-                  axis.title.y=element_text(size = 16),
-                  axis.text.x = element_text( size=14),
-                  axis.text.y = element_text( size=14)
-            )
-age.bar.plot
-
-#Boxplot
-age.box.plot <-ggplot(age.sum, aes (x = Phenotype, y=max.age, color = Phenotype)) +
-  geom_boxplot(alpha = 0.2) +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
+#Boxplot with jitter (n = 247)
+ls.box.plot <-ggplot(ls, aes (x = Phenotype, y = lifespan, fill = Phenotype)) +
+  geom_boxplot(alpha = 1) +
+  geom_jitter(color="black", size=1, alpha=0.5) +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="black", fill="white")+
   theme_pubr()+
-  stat_compare_means(method = "t.test")+
-  ylab("lifespan") +
-  theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-        axis.title.x=element_text(size = 16),
-        axis.title.y=element_text(size = 16),
-        axis.text.x = element_text( size=14),
-        axis.text.y = element_text( size=14),
-        legend.position="none",
-  )
-age.box.plot
+  ylab("lifespan")+
+  scale_fill_manual(values=c("firebrick", "steelblue3"))
+ls.box.plot
 
+#Boxplot with jitter (n = 87)
+ls.box.plot.foragers <-ggplot(AOF.pheno.date.ls, aes (x = Phenotype, y = lifespan)) +
+  geom_boxplot(alpha = 0.1, outlier.shape = NA) +
+  geom_jitter(color="black", shape = 21, size=2, alpha=0.5, aes(fill = Phenotype)) +
+  stat_summary(fun=mean, geom="point", shape=20, size=5, color="black", fill="black")+
+  theme_pubr()+
+  ylab("Lifespan")+
+  scale_fill_manual(values=c("firebrick", "steelblue3"))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_y_continuous(limits = c(0,NA))
+ls.box.plot.foragers
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/ls.box.plot.foragers.png", 
+       ls.box.plot.foragers,
+       width = 3,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
+
+#histogram with Fast and slow Groups
 p <- age.sum %>%
   ggplot( aes(x=max.age, fill=Phenotype)) +
     geom_histogram( color="#e9ecef", alpha=0.6, position = 'dodge') +
-    scale_fill_manual(values=c("#69b3a2", "#404080")) +
+    scale_fill_manual(values=c("firebrick", "steelblue3")) +
     theme_pubr() +
     labs(fill="")
 
-#Scatterplot with AOF and tagged date
-ggplot(ls) +
-  geom_point(aes(x=tagged_date, y= lifespan, color = Phenotype))+
-  geom_smooth(method=lm, aes(x=tagged_date, y= lifespan, color = Phenotype))+
-  theme_bw()
+#Scatterplot with lifespan and tagged date with ALL BEES (n = 247)
+ls.tagged.date  <- ggplot(ls) +
+        geom_point(aes(x=tagged_date, y= lifespan, color = Phenotype))+
+        geom_smooth(method=lm,
+                    aes(x=tagged_date, y= lifespan, color = Phenotype))+
+        theme_bw()
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/plot.ls.tagged.date.png", 
+       ls.tagged.date,
+       width = 7,
+       bg = "transparent",
+       height = 5, 
+       dpi = 500)
+
+#Scatterplot with lifespan and tagged date with ONLY FORAGERS (n = 87) IN MANUSCRIP
+AOF.pheno.date.ls<- AOF.pheno.date.ls%>%
+  mutate(tagged_date = ymd(tagged_date))
+ls.tagged.date.foragers  <- ggplot(AOF.pheno.date.ls, aes(x=tagged_date, y= lifespan, color = Phenotype)) +
+  geom_jitter(shape = 21, color = "black", aes(fill = Phenotype), size = 2)+
+  geom_smooth(method=lm, aes(x=tagged_date, y= lifespan, color = Phenotype, fill = Phenotype), alpha = 0.2)+
+  ylab("Lifespan")+
+  xlab("Birthdate")+
+  theme_pubr()+
+  theme(text = element_text(size = 12))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_fill_manual(values = c("firebrick", "steelblue3"))+
+  coord_cartesian(clip = "off")+
+  scale_y_continuous(expand = c(0,0), limits = c(0,50))
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/plot.ls.tagged.date.foragers.png", 
+       ls.tagged.date.foragers,
+       width = 6,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
+
 ```
 
-##Miscellaneous
+#B) Age at First Exit (AFE)
+##Wrangle Data
 ```{r}
-#Another way to calculate age but I dont know if I trust it...
-##########################################################################################
-age <- read_tsv("/Users/jcassano/Desktop/Masters Thesis/Summer 2020 Thesis Project/RFID Analysis/RFID 2020/RFID 2020/Track a Forager Output/NatJoin2_[1, 2]_ages.TXT")
-age.pheno <- drop_na(inner_join(Pheno.Key, age))
-age.pheno<-age.pheno%>%
-  dplyr::rename( age_first_scan = `age first scan`)%>%
-  dplyr::rename( age_last_scan = `age last scan`)
-#age of last scan
-age.pheno.sum <- group_by(age.pheno, Phenotype) %>%
-  dplyr::summarize(
-    n = dplyr::n(),
-    Mean.age = mean(age_last_scan),
-    sd = sd(age_last_scan))
-view(age.pheno.sum)
-
-shapiro.test(age.pheno$age_last_scan)
-hist(age.pheno$age_last_scan)
-ggdensity(age.pheno$age_last_scan)
-ggqqplot(age.pheno$age_last_scan)
-t.test((age.pheno %>% pull(age_last_scan)) ~ (age.pheno %>% pull(Phenotype)))
-
-ggplot(age.pheno, aes (x = Phenotype, y=`age last trip`, color = Phenotype)) +
-  geom_boxplot(alpha = 0.2) +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
-  theme_pubr()+
-  stat_compare_means(method = "t.test")+
-  ylab("Day of Last Scan") +
-  theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-        axis.title.x=element_text(size = 16),
-        axis.title.y=element_text(size = 16),
-        axis.text.x = element_text( size=14),
-        axis.text.y = element_text( size=14),
-        legend.position="none",
-  )
-#age of last trip
-age.pheno.sum <- group_by(age.pheno, Phenotype) %>%
-  dplyr::summarize(
-    n = dplyr::n(),
-    mean = mean(`age last trip`),
-    sd = sd(`age last trip`))
-age.pheno.sum
-
-shapiro.test(age.pheno$`age last trip`)
-hist(age.pheno$`age last trip`)
-ggdensity(age.pheno$`age last trip`)
-ggqqplot(age.pheno$`age last trip`)
-t.test((age.pheno %>% pull(`age last trip`)) ~ (age.pheno %>% pull(Phenotype)))
-
-#Barplot
-ggplot(age.pheno, aes (x = Phenotype, y=`age last trip`, color = Phenotype)) +
-  geom_boxplot(alpha = 0.2) +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
-  theme_pubr()+
-  stat_compare_means(method = "t.test")+
-  ylab("Day of Last Scan") +
-  theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-        axis.title.x=element_text(size = 16),
-        axis.title.y=element_text(size = 16),
-        axis.text.x = element_text( size=14),
-        axis.text.y = element_text( size=14),
-        legend.position = "none",
-  )
-
-
-ggplot(age.pheno, aes (x = Phenotype, y=`age last trip`, color = Phenotype)) +
-  geom_boxplot(alpha = 0.2) +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
-  theme_pubr()+
-  stat_compare_means(method = "t.test")+
-  ylab("Day of Last Scan") +
-  theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-        axis.title.x=element_text(size = 16),
-        axis.title.y=element_text(size = 16),
-        axis.text.x = element_text( size=14),
-        axis.text.y = element_text( size=14),
-        legend.position = "none",
-  )
-```
-
-#Trips per bee: mean and total
-```{r}
-#join trip.length and pheno.key dataframes and create columns for total trip length and average trip length
-#each entry is a trip
-trip.lengths <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_lengthsTripsFlights.TXT")
-
-trip.lengths <- left_join(trip.lengths, Pheno.Key) %>%
-  dplyr::rename(trip_length_s = `Trip length (in seconds)`)%>%
+trips <- read_tsv("Track a Forager Output/NatJoin2_[1, 2]_trips.TXT")
+View(trips)
+#Gather data for trips
+trips.AFE <- trips %>%
+  dplyr::rename(Trip_ID = `Trip ID`,
+                RFID = UID,
+                IN_OUT_Type = `IN-OUT type`)%>%
+  dplyr::group_by(Trip_ID)%>%
+  drop_na()%>%
+  dplyr::filter(IN_OUT_Type == "OUT")%>%
+  dplyr::select("Trip_ID", "RFID", "UTCTime")%>%
+  dplyr::mutate(UTCTime = mdy_hms(UTCTime))
+#Calculate First ping for each individual
+first.ping <- trips.AFE%>%
+  dplyr::group_by(RFID)%>%
+  dplyr::filter(UTCTime == min(UTCTime))%>%#This filters out the first ping for each RFID.
+  dplyr::rename(first_ping = UTCTime)
+join.first <- left_join(first.ping, Pheno.Key)%>%
+  dplyr::mutate(age = difftime( first_ping, tagged_date, units=c("days")))%>%
+  dplyr::mutate(age = as.numeric(age), age = round(age))
+View(join.first)
+#Calculate Age at First Exit
+age.first.exit <- last.trip%>%
   group_by(RFID)%>%
-  mutate(avg_trip_length = mean(trip_length_s),
-         total_trip_length = sum(trip_length_s))%>% #This is the total time spent foraging over the individual's life
-  drop_na()
-View(trip.lengths)
-
-#Sum table where each entry is a bee
-trips.sum <- group_by(trip.lengths, RFID, Phenotype) %>%
+  dplyr::mutate(AFE = min(age),
+                tagged_date = ymd(tagged_date))%>%
+  dplyr::filter(row_number()==1)%>%
+  dplyr::select(-c("Trip_ID", "age"))%>%
+  dplyr::rename(first_ping = UTCTime)%>%
+  drop_na()%>%
+  dplyr::mutate(Phenotype = as.factor(Phenotype))
+View(age.first.exit)
+```
+##Summarize
+```{r}
+age.first.exit.sum <- group_by(age.first.exit, Phenotype) %>%
   dplyr::summarize(
-    number_of_trips = dplyr::n(),
-    avg_trip_length = mean(trip_length_s),
-    total_trip_length = sum(trip_length_s))
-View(trips.sum)
+    n = dplyr::n(),
+    mean = mean(AFE),
+    sd = sd(AFE),
+    se = sd(AFE) / sqrt((length(AFE))))
+View(age.first.exit.sum)
+```
+##Histogram
+```{r}
+##histogram
+freq.hist.AFE <- age.first.exit %>%
+  ggplot( aes(x=AFE)) +
+    geom_histogram( color="#e9ecef", 
+                    alpha=0.6,
+                    binwidth = 5) +
+    theme_pubr() +
+    labs(x = "AFE")
+freq.hist.AFE
+##histogram by phenotype
+freq.hist.AFE2 <- age.first.exit %>%
+  ggplot( aes(x=AFE, fill=Phenotype)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'dodge') +
+    scale_fill_manual(values=c("firebrick3", "steelblue")) +
+    theme_pubr() +
+    labs(x = "lifespan", fill="")
+```
+##Stats
+
+###t-test comparing differences in AFE by phenotype
+```{r}
+t.test((age.first.exit %>% pull(AFE)) ~ (age.first.exit %>% pull(Phenotype)))
+```
+###linear models
+####1) Phenotype (Fixed Effect)
+```{r}
+lm.AFE <- lm(AFE ~ Phenotype, data = age.first.exit)
+summary(lm.AFE)
+Anova(lm.AFE, type = 2)
+plot(lm.AFE) #assumptions
+```
+####2) lm: Tagged Date + Phenotype (n = 247)
+```{r}
+#linear model: lifespan ~ Phenotype + tagged_date (n = 247)
+lm.AFE.date <- lm(AFE ~ Phenotype * tagged_date, data = age.first.exit)
+summary(lm.AFE.date)
+Anova(lm.AFE.date, type = 3)
+plot(lm.AFE.date) #assumptions
+```
+####3) lm: Tagged Date + Phenotype (n = 86)
+```{r}
+#Filtering only foragers (n = 86)
+AFE.date.forager <- right_join(age.first.exit, AOF.pheno.date)%>%
+  mutate(Phenotype = as.factor(Phenotype),
+         tagged_date = as.factor(tagged_date))%>%
+  ungroup()
+#t-test
+t.test((AFE.date.forager %>% pull(AFE)) ~ (AFE.date.forager %>% pull(Phenotype)))
+#lm: AFE ~ Phenotype + tagged_date
+lm.AFE.date.forager<- lm(AFE ~ Phenotype + tagged_date, data = AFE.date.forager)
+plot(lm.AFE.date.forager)
+summary(lm.AFE.date.forager)
+Anova(lm.AFE.date.forager, type = 2)
+plot(lm.AFE.date.forager) #assumptions
+```
+##Visualize
+```{r}
+#n = 244
+AFE.tagged.date <- ggplot( age.fxirst.exit) +
+  geom_jitter(aes(x=tagged_date, y= AFE, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= AFE, color = Phenotype))+
+  ylab("AFE")+
+  xlab("Birthdate")+
+  theme_pubr()+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,50))
+AFE.tagged.date
+#n = 87
+AFE.tagged.date.foragers  <- ggplot(AFE.date.forager) +
+  geom_jitter(aes(x=tagged_date, y= AFE, color = Phenotype))+
+  geom_smooth(method=lm, aes(x=tagged_date, y= AFE, color = Phenotype, fill = Phenotype), alpha = 0.2)+
+  ylab("AFE")+
+  xlab("Birthdate")+
+  theme_pubr()+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,45))
+AFE.tagged.date.foragers 
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/plot.afe.tagged.date.foragers.png", 
+       AFE.tagged.date.foragers ,
+       width = 7,
+       bg = "transparent",
+       height = 5, 
+       dpi = 500)
+```
+
+#C) Average Trip Length
+##Wrangle
+```{r}
+avg.trip.length <- group_by(trip.lengths, RFID)%>%
+  dplyr::summarize(
+    trips = dplyr::n(),
+    avg_trip_length_min = mean(`Trip length (in seconds)`)/60)
+View(avg.trip.length)
+write_csv(avg.trip.length, "avg.trip.length.CSV")
+
+#Filtering only foragers (n = 86)
+avg.trip.length.forager <- right_join(avg.trip.length, AOF.pheno.date)%>%
+  mutate(Phenotype = as.factor(Phenotype),
+         tagged_date = as.factor(tagged_date))
+
+avg.trip.length.forager <- avg.trip.length.forager%>%
+  mutate(tagged_date = lapply(avg.trip.length.forager$tagged_date, gsub, pattern="2020-07-31", replacement="2020-07-30"))%>%
+  unnest(tagged_date)
+
+avg.trip.length.forager$tagged_date <- as.factor(avg.trip.length.forager$tagged_date)
+```
+##Stats
+###T-test
+```{r}
+t.test((avg.trip.length.forager %>% pull(avg_trip_length_min)) ~ (avg.trip.length.forager %>% pull(Phenotype))) #p = 0.16
+```
+###Linear Models
+####1) lm: Phenotype + tagged date + Interaction (fixed variables) (n = 87)
+```{r}
+lm.atl.date <- lm(avg_trip_length_min ~ Phenotype + tagged_date, data = avg.trip.length.forager)
+summary(lm.atl.date)
+Anova(lm.atl.date, type = 3)
+plot(lm.atl.date) 
+```
+####2) lm: Tagged date as a random effect (n = 86)
+```{r}
+lm.atl.date.random <- lmer(avg_trip_length_min ~ Phenotype + (1|tagged_date), data = avg.trip.length.forager, REML = T)
+slopes <- summary(lm.atl.date.random)
+slopes$coefficients ##get model coefficients 
+Anova(lm.atl.date.random, type = 3)##Get P value for fixed effects
+rand(lm.atl.date.random)## Get p values for random effects 
 ```
 
 ##Visualize Data
 ```{r}
-#total trip length
-options(scipen = 999)
-freq.hist.total.trips <- trips.sum %>%
-  ggplot( aes(x=total_trip_length, fill=Phenotype)) +
-    geom_histogram( color="#e9ecef", alpha=0.6, position = 'dodge') +
-    scale_fill_manual(values=c("firebrick3", "steelblue")) +
-    theme_pubr() +
-    labs(x = "total foraging time (s)", fill="")
-#T-test
-t.test((trips.sum %>% pull(total_trip_length)) ~ (trips.sum %>% pull(Phenotype))) #p = 0.3581
-
-ggplot(trips.sum, aes (x = Phenotype, y=number_of_trips, color = Phenotype)) +
-  geom_boxplot(alpha = 0.2) +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
+#Wrangle
+avg.trip.length.forager <- avg.trip.length.forager %>%
+  mutate(tagged_date = ymd(tagged_date))
+#Boxplot for Average Trip Length with both phenotypes with jitter (n = 87)
+atl.box.plot.foragers <-ggplot(avg.trip.length.forager , aes (x = Phenotype, y = avg_trip_length_min)) +
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+  geom_jitter(color="black", shape = 21, size=2, alpha=0.5, aes(fill = Phenotype)) +
+  stat_summary(fun=mean, geom="point", shape=20, size=5, color="black", fill="black")+
   theme_pubr()+
-  stat_compare_means(method = "t.test")+
-  ylab("Lifetime Trips") +
-  theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-        axis.title.x=element_text(size = 16),
-        axis.title.y=element_text(size = 16),
-        axis.text.x = element_text( size=14),
-        axis.text.y = element_text( size=14),
-        legend.position="none",
-  )
+  ylab("Trip Length (min)")+
+  scale_fill_manual(values=c("firebrick", "steelblue3"))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_y_continuous(limits = c(0,NA))
+atl.box.plot.foragers
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/atl.box.plot.foragers.png", 
+       atl.box.plot.foragers,
+       width = 3,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
+
+#Scatterplot with AOF and tagged date
+atl.tagged.date.foragers  <- ggplot(avg.trip.length.forager, aes(x=tagged_date, y=avg_trip_length_min, color = Phenotype)) +
+  geom_jitter(shape = 21, color = "black", aes(fill = Phenotype), size = 2)+
+  geom_smooth(method=lm, aes(x=tagged_date, y= avg_trip_length_min, color = Phenotype, fill = Phenotype), alpha = 0.2)+
+  ylab("Trip Length (min)")+
+  xlab("Birthdate")+
+  theme_pubr()+
+  theme(text = element_text(size = 12))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_fill_manual(values = c("firebrick", "steelblue3"))+
+  coord_cartesian(clip = "off")+
+  scale_y_continuous(expand = c(0,0), limits = c(0,NA))
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/plot.atl.tagged.date.foragers.png", 
+       atl.tagged.date.foragers ,
+       width = 6,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
 
 #Avg trip length
 freq.hist.avg.trips <- trips.sum %>%
@@ -568,19 +703,20 @@ freq.hist.avg.trips <- trips.sum %>%
     scale_fill_manual(values=c("firebrick3", "steelblue")) +
     theme_pubr() +
     labs(x = "mean foraging time per trip (s)", fill="")
-#T-test
-t.test((trips.sum %>% pull(avg_trip_length)) ~ (trips.sum %>% pull(Phenotype))) #p = 0.3581
 ```
 
-#Trips per Day
-##Calculating trips per day
+#D) Trips per Day
+##Wrangle
 ```{r}
 #Calculate the number of trips per day for individuals by dividing it's total number of trips by lifespan in days
-trips.per.day <- left_join(ls , trips.sum) %>%
-  dplyr::mutate(trips_per_day = number_of_trips/lifespan)
+trips.sum <- RFID.trips%>%
+  group_by(RFID)
+  
+trips.per.day <- left_join(ls , RFID.trips) %>%
+  dplyr::mutate(trips_per_day =`number of trips`/lifespan)
 View(trips.per.day)
 ```
-##Summarize Data
+##Summarize
 ```{r}
 #Mean trips per day for fast and slow bees
 trips.per.day.sum <- group_by(trips.per.day, Phenotype) %>%
@@ -590,14 +726,51 @@ trips.per.day.sum <- group_by(trips.per.day, Phenotype) %>%
     sd = sd(trips_per_day))
 View(trips.per.day.sum )
 
+#Only foragers (n = 87)
+trips.per.day.foragers <- left_join(AOF.pheno, trips.per.day)%>%
+  mutate(Phenotype = as.factor(Phenotype),
+         tagged_date= as.factor(tagged_date))%>%
+  mutate(tagged_date = lapply(AOF.pheno.date.ls$tagged_date, gsub, pattern="2020-07-31", replacement="2020-07-30"))%>%
+  unnest(tagged_date)
 ```
 ##Stats
+###Assumptions
 ```{r}
 shapiro.test(trips.per.day$trips_per_day)
 hist(trips.per.day$trips_per_day) #Heavy Right Skew
 ggdensity(trips.per.day$trips_per_day)
 ggqqplot(trips.per.day$trips_per_day)
 t.test((trips.per.day %>% pull(trips_per_day)) ~ (trips.per.day %>% pull(Phenotype))) # p = 0.54 
+#n = 87
+ggqqplot(trips.per.day.foragers$trips_per_day)
+t.test((trips.per.day.foragers %>% pull(trips_per_day)) ~ (trips.per.day.foragers %>% pull(Phenotype))) # p = 0.96
+```
+
+###linear models
+####1) lm: trips_per_day ~ Phenotype + tagged_date n = 87
+```{r}
+lm.tpd.foragers <- lm(trips_per_day ~ Phenotype + tagged_date, data = trips.per.day.foragers)
+summary(lm.tpd.foragers)
+Anova(lm.tpd.foragers, type = 3) #tagged_date = p = <0.001
+```
+####2) Tagged date as a random effect (n = 87)
+```{r}
+lm.tpd.date.random <- lmer(trips_per_day ~ Phenotype + (1|tagged_date), data = trips.per.day.foragers, REML = T)
+slopes <- summary(lm.tpd.date.random)
+slopes$coefficients ##get model coefficients 
+Anova(lm.tpd.date.random, type = 3)##Get P value for fixed effects
+rand(lm.tpd.date.random)## Get p values for random effects; tagged_date = p = <0.001
+hist(lm.aof.ls.date.random$Flowers.Visited, breaks = 48)
+
+#lm with interaction IN MANUSCRIPT
+lm.tpd.foragers.interaction <- lm(trips_per_day ~ tagged_date * Phenotype, data = trips.per.day.foragers)
+summary(lm.tpd.foragers.interaction)
+Anova(lm.tpd.foragers.interaction, type = 3) #Interaction = p = 0.0099 
+emout.tpd <- emmeans(lm.tpd.foragers.interaction, ~ Phenotype)
+pairs(emout.tpd, adjustment = "none")
+
+estimate_means(lm.tpd.foragers.interaction, at = "Phenotype" )
+estimate_contrasts(lmBee.Flowers, contrast = c("Phenotype", "Concentration") )
 ```
 ##Visualize Data
 ```{r}
@@ -609,20 +782,24 @@ freq.hist.trips.per.day <- trips.per.day %>%
     theme_pubr() +
     labs(x = "trips per day", fill="")
 
-#Boxplot
-ggplot(lifetime.data, aes(x = Phenotype, y=lifetime_contribution, color = Phenotype)) +
-  geom_boxplot(alpha = 0.2) +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
+#Boxplot with jitter (n = 87)
+tpd.box.plot.foragers <-ggplot(trips.per.day.foragers, aes (x = Phenotype, y = trips_per_day)) +
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+  geom_jitter(color="black", shape = 21, size=2, alpha=0.5, aes(fill = Phenotype)) +
+  stat_summary(fun=mean, geom="point", size=5, color="black", fill="black")+
   theme_pubr()+
-  stat_compare_means(method = "t.test")+
-  ylab("Lifetime Contribution") +
-  theme(plot.title = element_text(color="black", size=16, face="bold", hjust = 0), 
-        axis.title.x=element_text(size = 16),
-        axis.title.y=element_text(size = 16),
-        axis.text.x = element_text( size=14),
-        axis.text.y = element_text( size=14),
-        legend.position="none",
-  )
+  ylab("Daily Foraging Frequency")+
+  scale_fill_manual(values=c("firebrick", "steelblue3"))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_y_continuous(limits = c(0,NA))
+tpd.box.plot.foragers
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/tpd.box.plot.foragers.png", 
+       tpd.box.plot.foragers,
+       width = 3,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
 
 #Frequency Histogram: Total Trips
 freq.hist.number.of.trips <- trips.per.day %>%
@@ -633,13 +810,30 @@ freq.hist.number.of.trips <- trips.per.day %>%
     labs(x = "total trips", fill="")
 
 #Scatterplot with AOF and tagged date
-ggplot(trips.per.day) +
-  geom_point(aes(x=tagged_date, y= trips_per_day, color = Phenotype))+
-  geom_smooth(method=lm, aes(x=tagged_date, y= trips_per_day, color = Phenotype))+
-  theme_bw()
+trips.per.day.foragers<- trips.per.day.foragers%>%
+  mutate(tagged_date = ymd(tagged_date))
+
+tpd.tagged.date.foragers  <- ggplot(trips.per.day.foragers, aes(x=tagged_date, y=trips_per_day, color = Phenotype)) +
+  geom_jitter(shape = 21, color = "black", aes(fill = Phenotype), size = 2)+
+  geom_smooth(method=lm, aes(x=tagged_date, y= trips_per_day, color = Phenotype, fill = Phenotype), alpha = 0.2)+
+  ylab("Daily Trip Frequency")+
+  xlab("Birthdate")+
+  theme_pubr()+
+  theme(text = element_text(size = 12))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_fill_manual(values = c("firebrick", "steelblue3"))+
+  coord_cartesian(clip = "off")+
+  scale_y_continuous(expand = c(0,0), limits = c(0,NA))
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/plot.tpd.tagged.date.foragers.png", 
+       tpd.tagged.date.foragers ,
+       width = 6,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
 ```
 
-#Age of Onset of Foraging (AOF)
+#E) Age of Onset of Foraging (AOF)
 ##Prep data for AOF package
 ```{r}
 #Example Data set from Requier et al. 2020
@@ -698,18 +892,22 @@ View(AOF.clean)
 #write CSV for AOF output
 write_csv(AOF.clean, "AOF.output")
 
+AOF.clean <- read_csv("AOF.output")
 #Add phenotype back into the mix
 AOF.pheno <- inner_join(Pheno.Key, AOF.clean)%>%
-  dplyr::select("RFID", "AOF", "Phenotype")
+  dplyr::select("RFID", "AOF", "Phenotype")%>%
+  filter(RFID != "D1 66 22 06 08 00 12 E0") #filter out mistake
 
 #Write CSV AOF.pheno
 write_csv(AOF.pheno, "AOF.pheno.CSV")
 View(AOF.pheno)
 ```
 
-##Summarize Data
+##START HERE after running AOF 
+##Summarize
 ```{r}
 AOF.pheno <- read_csv("AOF.pheno.CSV")
+Pheno.Key <- read_csv("RFID Cohort CSV/Pheno.Key.CSV")
 #Summary of AOF mean, sd, and se per phenotype
 AOF.pheno.sum <- group_by(AOF.pheno, Phenotype) %>%
   dplyr::summarize(
@@ -718,18 +916,37 @@ AOF.pheno.sum <- group_by(AOF.pheno, Phenotype) %>%
     sd = sd(AOF),
     se = sd(AOF) / sqrt((length(AOF))))
 View(AOF.pheno.sum)
-
 #Dataframe including tagged date
 AOF.pheno.date <- left_join(AOF.pheno, Pheno.Key)%>%
-  mutate(tagged_date = ymd(tagged_date))
+  mutate(tagged_date = ymd(tagged_date),
+         Phenotype = as.factor(Phenotype),
+         tagged_date = as.factor(tagged_date))
 ```
 ##Stats
+###Assumptions
 ```{r}
 shapiro.test(AOF.pheno$AOF)
 hist(AOF.pheno$AOF)
 ggdensity(AOF.pheno$AOF)
 ggqqplot(AOF.pheno$AOF)
 t.test((AOF.pheno %>% pull(AOF)) ~ (AOF.pheno %>% pull(Phenotype)))# p = 0.005756
+```
+###Linear Models
+####1) lm with phenotype as a fixed variable
+```{r}
+lm.aof <- lm(AOF ~ Phenotype, data = AOF.pheno)
+summary(lm.aof)
+Anova(lm.aof, type = 2)
+plot(lm.aof) 
+```
+####2) lm with Phenotype and tagged date as fixed variables
+```{r}
+lm.aof.date <- lm(AOF ~ Phenotype + tagged_date, data = AOF.pheno.date)
+summary(lm.aof.date)
+Anova(lm.aof.date, type = 3)
+plot(lm.aof.date)
+emout1 <- emmeans(lm.aof.date, ~ Phenotype)
+pairs(emout1, adjustment = "none")
 ```
 ###Calculating Outliers
 ```{r}
@@ -770,44 +987,48 @@ freq.hist.AOF <- AOF.pheno %>%
     theme_pubr() +
     labs(x = "AOF", fill="")
 
-#Barplot for AOF with both phenotypes - NOT LOG TRANSFORMED
-pd <- position_dodge(0.9)
-bar.AOF <- ggplot(AOF.pheno.sum, aes(x=Phenotype, y=mean, fill = Phenotype))+
-            geom_bar(stat="identity", position=position_dodge()) +
-            geom_errorbar(aes(ymin=mean-se, ymax=mean+se),
-                          position = pd,
-                          width=0.1,
-                          colour = "black",
-                          size=1) +
-            scale_fill_manual(values=c("firebrick", "steelblue3"))+
-            theme_pubr() +
-            labs(y ="Age at onset of foraging (AOF)")+
-            theme(legend.title = element_blank())
-bar.AOF
+#Barplot for AOF with both phenotypes with jitter (n = 87)
+aof.box.plot.foragers <-ggplot(AOF.pheno.date, aes (x = Phenotype, y = AOF)) +
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+  geom_jitter(color="black", shape = 21, size=2, alpha=0.5, aes(fill = Phenotype)) +
+  stat_summary(fun=mean, geom="point", size=5, color="black", fill="black")+
+  theme_pubr()+
+  ylab("AOF")+
+  scale_fill_manual(values=c("firebrick", "steelblue3"))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_y_continuous(limits = c(0,NA))
+aof.box.plot.foragers
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/aof.box.plot.foragers.png", 
+       aof.box.plot.foragers,
+       width = 3,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
 
 #Scatterplot with AOF and tagged date
-ggplot(AOF.pheno.date) +
-  geom_point(aes(x=tagged_date, y= AOF, color = Phenotype))+
-  geom_smooth(method=lm, aes(x=tagged_date, y= AOF, color = Phenotype))+
-  theme_bw()
 
-#Scatterplot with lifespan and tagged date
-AOF.pheno.date.ls <- left_join(AOF.pheno.date, ls)
-ggplot(AOF.pheno.date.ls) +
-  geom_point(aes(x=tagged_date, y= lifespan, color = Phenotype))+
-  geom_smooth(method=lm, aes(x=tagged_date, y= lifespan, color = Phenotype))+
-  theme_bw()
+AOF.pheno.date<- AOF.pheno.date%>%
+  mutate(tagged_date = ymd(tagged_date))
 
+aof.tagged.date  <- ggplot(AOF.pheno.date, aes(x=tagged_date, y= AOF, color = Phenotype)) +
+  geom_jitter(shape = 21, color = "black", aes(fill = Phenotype), size = 2)+
+  geom_smooth(method=lm, aes(x=tagged_date, y= AOF, color = Phenotype, fill = Phenotype), alpha = 0.2)+
+  ylab("AOF")+
+  xlab("Birthdate")+
+  theme_pubr()+
+  theme(text = element_text(size = 12))+
+  scale_color_manual(values=c("firebrick", "steelblue3"))+
+  scale_fill_manual(values = c("firebrick", "steelblue3"))+
+  coord_cartesian(clip = "off")+
+  scale_y_continuous(expand = c(0,0), limits = c(0,50))
 
-hist(AOF.pheno.date.ls$lifespan)
-ggqqplot(AOF.pheno.date.ls$lifespan)
-t.test((AOF.pheno.date.ls %>% pull(lifespan)) ~ (AOF.pheno.date.ls %>% pull(Phenotype)))
-
-lm.aof.ls <- lm(lifespan ~ Phenotype, data = AOF.pheno.date.ls)
-summary(lm.aof.ls)
-anova(lm.aof.ls)
-plot(lm.aof.ls) 
-
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/plot.aof.tagged.date.foragers.png", 
+       aof.tagged.date ,
+       width = 6,
+       bg = "transparent",
+       height = 4, 
+       dpi = 500)
 ```
 ###log transform
 ```{r}
@@ -826,9 +1047,10 @@ bar.log.AOF <- ggplot(AOF.pheno.sum.log, aes(x=Phenotype, y=mean, fill = Phenoty
 bar.log.AOF
 ```
 
-#Number of Foraging Days
-##Calculate the number of days spent foraging
+#F) Number of Foraging Days
+##Wrangle 
 ```{r}
+#Calculate the number of days spent foraging
 AOF.clean <- read_csv("AOF.output")
 foraging.days <- inner_join(ls, AOF.clean)%>%
   dplyr::mutate(foraging_days = lifespan - AOF)%>%
@@ -836,7 +1058,7 @@ foraging.days <- inner_join(ls, AOF.clean)%>%
 
 View(foraging.days)
 ```
-##Summarize Data
+##Summarize
 ```{r}
 #Summary of AOF mean, sd, and se per phenotype
 foraging.days.sum <- group_by(foraging.days, Phenotype) %>%
@@ -848,12 +1070,29 @@ foraging.days.sum <- group_by(foraging.days, Phenotype) %>%
 view(foraging.days.sum)
 ```
 ##Stats
+###Assumptions
 ```{r}
 shapiro.test(foraging.days$foraging_days)
 hist(foraging.days$foraging_days)
 ggdensity(foraging.days$foraging_days)
 ggqqplot(foraging.days$foraging_days)
 t.test((foraging.days %>% pull(foraging_days)) ~ (foraging.days %>% pull(Phenotype))) #  p = 0.34
+```
+###Linear Models
+####1) lm: phenotype as a fixed variable
+```{r}
+#lm with foraging days with phenotype as a fixed variable n = 87
+lm.foraging.days <- lm(foraging_days ~ Phenotype, data = foraging.days)
+summary(lm.foraging.days)
+anova(lm.foraging.days)
+plot(lm.foraging.days) 
+```
+####2) lm: phenotype + tagged_date as a fixed variable
+```{r}
+lm.foraging.days.date <- lm(foraging_days ~ Phenotype + tagged_date + Phenotype*tagged_date, data = foraging.days)
+summary(lm.foraging.days.date)
+Anova(lm.foraging.days.date, type = 3)
+plot(lm.foraging.days.date) 
 ```
 ##Visualize Data
 ```{r}
@@ -872,10 +1111,11 @@ ggplot(foraging.days) +
   theme_bw()
 ```  
 
-#Average number of Trips per day after AOF
-##Calculating trips per day after AOF
+#G) Average number of Trips per day after AOF
+##NEED TO RECALCULATE Calculating trips per day after AOF
 ```{r}
 #This calculates the number of trips per day by dividing the total number of trips by the number of foraging days (better way of getting trips per day)
+##Need to recalculate the number of trips
 trips.per.day.foraging <- left_join(trips.per.day, foraging.days)%>%
   dplyr::mutate(trips_per_day_foraging = number_of_trips/foraging_days)%>%
   drop_na()
@@ -898,6 +1138,18 @@ hist(trips.per.day.foraging$trips_per_day_foraging)
 ggdensity(trips.per.day.foraging$trips_per_day_foraging)
 ggqqplot(trips.per.day.foraging$trips_per_day_foraging)
 t.test((trips.per.day.foraging %>% pull(trips_per_day_foraging)) ~ (trips.per.day.foraging %>% pull(Phenotype))) # p = 0.86
+
+#lm with avg trips per day after foraging as response variable with phenotype as a fixed variable
+lm.trips.pre.day.after <- lm(trips_per_day_foraging ~ Phenotype, data = trips.per.day.foraging)
+summary(lm.trips.pre.day.after)
+anova(lm.trips.pre.day.after)
+plot(lm.trips.pre.day.after) 
+
+#lm with avg trips per day after foraging as response variable with phenotype as a fixed variable
+lm.trips.pre.day.after.date <- lm(trips_per_day_foraging ~ Phenotype + tagged_date, data = trips.per.day.foraging)
+summary(lm.trips.pre.day.after.date)
+anova(lm.trips.pre.day.after.date)
+plot(lm.trips.pre.day.after.date) 
 ```
 ##Visualize Data
 ```{r}
@@ -910,7 +1162,7 @@ freq.hist.trips.after.AOF <- trips.per.day.foraging %>%
     labs(x = "trips per day after AOF", fill="")
 
 
-#Scatterplot with AOF and tagged date
+#Scatterplot with average trips per day (after AOF) and tagged date
 ggplot(trips.per.day.foraging) +
   geom_point(aes(x=tagged_date, y= trips_per_day_foraging, color = Phenotype))+
   geom_smooth(method=lm, aes(x=tagged_date, y= trips_per_day_foraging, color = Phenotype))+
@@ -918,7 +1170,7 @@ ggplot(trips.per.day.foraging) +
 
 ```
 
-#Creating Master Data set
+#H) Creating Master Data set
 ```{r}
 MasterData1 <- plyr::join(ls,
                           trips.sum,
@@ -947,6 +1199,10 @@ MasterData <- MasterData%>%
   dplyr::mutate(avg_trip_length = round(MasterData$avg_trip_length, 2),
                 trips_per_day = round(MasterData$trips_per_day, 2))%>%
   dplyr::select(-UTCTime)
+
+MasterData <- read_csv( "MasterData.RFID.CSV")
+MasterData <- left_join(MasterData, age.first.exit)%>%
+  dplyr::mutate(Phenotype = as.factor(Phenotype))
 
 MasterData <- as_tibble(MasterData)
 write_csv(MasterData, "MasterData.RFID.CSV")
@@ -981,34 +1237,126 @@ freq.hist2 <- ggarrange(freq.hist.number.pf.trips + rremove("ylab"),
                         nrow = 2)
 freq.hist2
 ggsave(plot = freq.hist2, filename = "/Users/jcassano/Desktop/freq.hist2.png", width = 9, height = 5, dpi = 300)
+
+
+#Combining boxplots comparing means 
+ls.aof.boxplots <- ggarrange(ls.box.plot.foragers,
+                             aof.box.plot)
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/ls.aof.boxplots.png", 
+       ls.aof.boxplots,
+       width = 4,
+       bg = "transparent",
+       height = 3, 
+       dpi = 500)
+
+#Scatter plots 
+scatter.plots.date <- ggarrange(tpd.tagged.date.foragers +
+                                  rremove("xlab"),
+                                atl.tagged.date.foragers +
+                                  rremove("xlab"),
+                                aof.tagged.date + 
+                                  rremove("xlab"),
+                                ls.tagged.date.foragers +
+                                  rremove("xlab"),
+                                ncol = NULL,
+                                nrow = NULL,
+                                common.legend = TRUE,
+                                legend = "top",
+                                labels = c("a)","b)", "c)","d)" )
+                                )
+
+ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/scatter.plots.date.jpg", 
+       scatter.plots.date,
+       width = 7,
+       bg = "transparent",
+       height = 5, 
+       dpi = 500)
+```
+##Sankey Plot
+```{r}
+# Load package
+library(networkD3)
+
+# A connection data frame is a list of flows with intensity for each flow
+links <- data.frame(source = c("Birth",
+                               "First Exit",
+                               "Onset of Foraging",
+                               "First Exit",
+                               "Birth"),
+                    target = c("First Exit",
+                               "Onset of Foraging",
+                               "Forager Lifespan",
+                               "Natural Lifespan",
+                               "Died in hive or lost tag"),
+                    value = c(282, 87 , 87, 195, 70))
+
+# From these flows we need to create a node data frame: it lists every entities involved in the flow
+nodes <- data.frame(
+  name=c(as.character(links$source), 
+  as.character(links$target)) %>% unique()
+)
+
+# With networkD3, connection must be provided using id, not using real name like in the links dataframe.. So we need to reformat it.
+links$IDsource <- match(links$source, nodes$name)-1 
+links$IDtarget <- match(links$target, nodes$name)-1
+
+my_color <- 'd3.scaleOrdinal() .domain([ "First Exit", "Onset of Foraging", "Natural Lifespan", "Died in hive or lost tag", "Birth"]) .range([ "#EDCB64", "#DAECED", "#CC8B3C", "#B62A3D", "#CECD7B" ])' 
+
+# Make the Network
+p <- sankeyNetwork(Links = links, Nodes = nodes,
+              Source = "IDsource", Target = "IDtarget",
+              Value = "value", NodeID = "name", 
+              sinksRight=F,
+              units = "bees",
+              fontFamily = "bold",
+              colourScale = my_color,
+              nodeWidth=20,
+              fontSize=14)
+
+p
+
+
+# save the widget
+library(htmlwidgets)
+library(webshot)
+saveWidget(p, file = "sankeyRFID.html")
+
+#install phantom:
+webshot::install_phantomjs()
+# Make a webshot in pdf : high quality but can not choose printed zone
+webshot("sankeyRFID.html" , "SankeyRFID.pdf", delay = 0.2)
+
+# Make a webshot in png : Low quality - but you can choose shape
+webshot("sankeyRFID.html" , "SankeyRFID.png", delay = 0.2 , cliprect = c(440, 0, 1000, 10))
 ```
 
-#Correlation
+#I) Exploring Correlations
 ```{r}
 Masterdata.drop.NA <- MasterData%>%
   drop_na()
 ```
-##Matrix
+##Corr Matrix
 ```{r}
 #Correlation matrix
 corr.matrix <- ggpairs(Masterdata.drop.NA,  
-        columns = c(3, 4, 5, 6, 7, 8, 9, 10, 11),
-        columnLabels = c("pheno","ls", "trips","avg.length",
-                 "length","trip/day","aof", "forage.days", "t/d.aof"),
-        rowLabels = c("pheno","ls", "trips","avg.length",
-                 "length","trip/day","aof", "forage.days", "t/d.aof"),
+        columns = c( 3, 2, 4, 6, 8, 9, 10, 13),
+        columnLabels = c("pheno", "tagged_date", "ls", "avg.length",
+                 "trip/day","aof", "forage.days", "AFE"),
+        rowLabels = c("pheno", "tagged_date", "ls", "avg.length",
+                 "trip/day","aof", "forage.days", "AFE"),
         upper = list(continuous = wrap("cor", size = 3, method = "spearman")))
+corr.matrix
 #Save plot
 ggsave("corrmatrix.2020.jpeg", corr.matrix, dpi = 500)
 ```
-##Table
+##Corr Table
 ```{r}
 #Table Visualization
 rcorr <- rcorr(as.matrix(Masterdata.drop.NA[,4:11]))
 coeff = round(rcorr$r, 3)
 p.value = round(rcorr$P, 4)
 n = rcorr[["n"]]
-
 
 flattenCorrMatrix <- function(cormat, pmat) {
   ut <- upper.tri(cormat)
