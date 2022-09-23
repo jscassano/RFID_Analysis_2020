@@ -34,6 +34,9 @@ library(modelbased)
 library(broom)
 library(survival) # for cox proportion hazards model if I want to run that
 library(survminer)
+library(networkD3)
+library(htmlwidgets)
+library(webshot)
 ```
 
 #Reading in raw RFID csv data files (fter conversion from raw xml
@@ -1209,7 +1212,7 @@ write_csv(MasterData, "MasterData.RFID.CSV")
 write_delim(MasterData, "MasterData.RFID.txt", quote = "none")
 ```
 
-##Visualize Data
+##Visualize Master Data
 ```{r}
 #combine frequency plots with fast and slow bars split
 freq.hist1 <- ggarrange(freq.hist.lifespan + rremove("ylab"),
@@ -1273,11 +1276,8 @@ ggsave("/Users/jcassano/Desktop/Masters Thesis/Summer 2021/Writing/plots/scatter
        height = 5, 
        dpi = 500)
 ```
-##Sankey Plot
+###Sankey Plot
 ```{r}
-# Load package
-library(networkD3)
-
 # A connection data frame is a list of flows with intensity for each flow
 links <- data.frame(source = c("Birth",
                                "First Exit",
@@ -1290,19 +1290,15 @@ links <- data.frame(source = c("Birth",
                                "Natural Lifespan",
                                "Died in hive or lost tag"),
                     value = c(282, 87 , 87, 195, 70))
-
 # From these flows we need to create a node data frame: it lists every entities involved in the flow
 nodes <- data.frame(
   name=c(as.character(links$source), 
   as.character(links$target)) %>% unique()
 )
-
 # With networkD3, connection must be provided using id, not using real name like in the links dataframe.. So we need to reformat it.
 links$IDsource <- match(links$source, nodes$name)-1 
 links$IDtarget <- match(links$target, nodes$name)-1
-
 my_color <- 'd3.scaleOrdinal() .domain([ "First Exit", "Onset of Foraging", "Natural Lifespan", "Died in hive or lost tag", "Birth"]) .range([ "#EDCB64", "#DAECED", "#CC8B3C", "#B62A3D", "#CECD7B" ])' 
-
 # Make the Network
 p <- sankeyNetwork(Links = links, Nodes = nodes,
               Source = "IDsource", Target = "IDtarget",
@@ -1313,20 +1309,13 @@ p <- sankeyNetwork(Links = links, Nodes = nodes,
               colourScale = my_color,
               nodeWidth=20,
               fontSize=14)
-
 p
-
-
-# save the widget
-library(htmlwidgets)
-library(webshot)
+#save the widget
 saveWidget(p, file = "sankeyRFID.html")
-
 #install phantom:
 webshot::install_phantomjs()
 # Make a webshot in pdf : high quality but can not choose printed zone
 webshot("sankeyRFID.html" , "SankeyRFID.pdf", delay = 0.2)
-
 # Make a webshot in png : Low quality - but you can choose shape
 webshot("sankeyRFID.html" , "SankeyRFID.png", delay = 0.2 , cliprect = c(440, 0, 1000, 10))
 ```
